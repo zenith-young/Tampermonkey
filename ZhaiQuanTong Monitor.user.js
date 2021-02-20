@@ -7,6 +7,7 @@
 // @match        https://web.meiduzaixian.com/mall/mall-app/mall-web/index.html
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js
 // @require      https://cdn.bootcdn.net/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js
+// @require      https://cdn.bootcdn.net/ajax/libs/moment.js/2.29.1/moment.min.js
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
@@ -37,7 +38,7 @@ var createRequestHeader = function () {
     };
 };
 
-var isSign = function () {
+var API_isSign = function () {
     GM_xmlhttpRequest({
         method: "POST",
         url: "https://mall.meiduzaixian.com/mall/order/trade/isSign",
@@ -54,7 +55,7 @@ var isSign = function () {
     });
 };
 
-var getHomePageNew = function () {
+var API_getHomePageNew = function () {
     GM_xmlhttpRequest({
         method: "POST",
         url: "https://mall.meiduzaixian.com/operation/operate/home/getHomePageNew",
@@ -73,7 +74,7 @@ var getHomePageNew = function () {
     });
 };
 
-var getRecommendInfo = function () {
+var API_getRecommendInfo = function () {
     GM_xmlhttpRequest({
         method: "POST",
         url: "https://mall.meiduzaixian.com/operation/operate/home/getRecommendInfo",
@@ -100,6 +101,26 @@ var getRecommendInfo = function () {
     });
 };
 
+var API_detail = function (sku, productSourceType) {
+    GM_xmlhttpRequest({
+        method: "POST",
+        url: "https://mall.meiduzaixian.com/mall/product/locallife/detail",
+        data: JSON.stringify({
+            sku: sku,
+            productSourceType: productSourceType,
+        }),
+        headers: createRequestHeader(),
+        onerror: function (err) {
+            showLog("Failed to execute detail");
+            showLog(err);
+        },
+        onload: function (result) {
+            showLog("Succeeded in executing detail");
+            onDetailReceived(JSON.parse(result.response));
+        },
+    });
+}
+
 // Callback Functions
 
 var onIsSignReceived = function (response) {
@@ -124,6 +145,43 @@ var onRecommendInfoReceived = function (response) {
     showLog(response);
 };
 
+var onDetailReceived = function (response) {
+
+    if (response.status !== "000000") {
+        showLog(response);
+        return;
+    }
+
+    showLog(response);
+
+    var existedInventory = baoKuanInventoryMap[response.result.sku];
+    var newInventory = response.result.inventory;
+
+    var inventoryStatus = undefined;
+    if (existedInventory === undefined && newInventory === 0) {
+        inventoryStatus = "一开始就没货";
+    } else if (existedInventory !== newInventory && newInventory > 0) {
+        inventoryStatus = "有货";
+    } else if (existedInventory !== newInventory && newInventory === 0) {
+        inventoryStatus = "刚刚卖光了";
+    }
+    if (inventoryStatus !== undefined) {
+        showLog("", true);
+        showLog("商品：" + response.result.productName, true);
+        showLog("库存状态：" + inventoryStatus, true);
+        showLog("库存：" + newInventory, true);
+        showLog("售价：" + response.result.payNeedGoldenBean + " 金币", true);
+        showLog("当前时间：" + moment().format("YYYY-MM-DD HH:mm:ss.SSS"), true);
+    }
+
+    baoKuanInventoryMap[response.result.sku] = newInventory;
+
+    receivedBaoKuanDetailsCount++;
+    if (receivedBaoKuanDetailsCount === baoKuanDetailsCount) {
+//         setTimeout(API_getHomePageNew, REQUEST_INTERVAL);
+    }
+};
+
 // Injected Functions
 
 var handleFloorBaoKuan = function (floor) {
@@ -131,17 +189,35 @@ var handleFloorBaoKuan = function (floor) {
     showLog("Catch it!");
     showLog("-> title: " + floor.title);
     showLog("-> count: " + floor.details.length);
+    showLog(floor);
+
+    baoKuanDetailsCount = floor.details.length;
+    receivedBaoKuanDetailsCount = 0;
 
     var details = floor.details;
     for (var i = 0; i < details.length; i++) {
         var linkUrl = details[i].linkUrl;
-        // TODO:
+        var sku = getParamValue(linkUrl, "sku");
+        var productSourceType = getParamValue(linkUrl, "productSourceType");
+        API_detail(sku, productSourceType);
     }
-}
+};
+
+// Global Variables & Getter/Setter
+
+var REQUEST_INTERVAL = 100;
+
+var baoKuanDetailsCount = 0;
+var receivedBaoKuanDetailsCount = 0;
+
+var baoKuanInventoryMap = {};
 
 // Utils
 
-var showLog = function (obj) {
+var showLog = function (obj, enableLog = false) {
+    if (!enableLog) {
+        return;
+    }
     if (typeof(obj) === "string") {
         console.log("[Tampermonkey]: " + obj);
     } else {
@@ -150,10 +226,21 @@ var showLog = function (obj) {
     }
 };
 
+var getParamValue = function (url, key) {
+    var params = url.split("?")[1].split("&");
+    for (var i = 0; i < params.length; i++) {
+        var param = params[i].split("=");
+        if (param[0] === key) {
+            return unescape(param[1]);
+        }
+    }
+    return null;
+};
+
 // Main
 
 $(function() {
     'use strict';
 
-    getHomePageNew();
+    setTimeout(API_getHomePageNew, REQUEST_INTERVAL);
 });
