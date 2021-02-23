@@ -128,6 +128,7 @@ var onIsSignReceived = function (response) {
 };
 
 var onHomePageNewReceived = function (response) {
+    showLog("API_getHomePageNew count: " + ++API_getHomePageNew_count);
     if (response.status !== "000000") {
         showLog(response);
         return;
@@ -135,7 +136,7 @@ var onHomePageNewReceived = function (response) {
     var floors = response.result.floors;
     for (var i = 0; i < floors.length; i++) {
         if (floors[i].floorType === "57") {
-            handleFloorBaoKuan(floors[i]);
+            handleBaoKuanFloor(floors[i]);
             break;
         }
     }
@@ -146,18 +147,49 @@ var onRecommendInfoReceived = function (response) {
 };
 
 var onDetailReceived = function (response) {
-
+    showLog("API_detail count: " + ++API_detail_count);
     if (response.status !== "000000") {
         showLog(response);
         return;
     }
+    handleBaoKuanDetail(response.result);
+};
 
-    showLog(response);
+// Injected Functions
 
-    var existedInventory = baoKuanInventoryMap[response.result.sku];
-    var newInventory = response.result.inventory;
+var handleBaoKuanFloor = function (floor) {
 
+    showLog(floor);
+
+    for (var i = 0; i < floor.details.length; i++) {
+        var linkUrl = floor.details[i].linkUrl;
+        var sku = getParamValue(linkUrl, "sku");
+        var productSourceType = getParamValue(linkUrl, "productSourceType");
+        if (getBaoKuanProductDetail(sku) !== null) {
+            continue;
+        }
+        baoKuanProductDetails.push({
+            linkUrl: linkUrl,
+            sku: sku,
+            productSourceType: productSourceType,
+            inventory: undefined,
+        });
+        showLog(baoKuanProductDetails, true);
+        setInterval(API_detail, REQUEST_INTERVAL, sku, productSourceType);
+    }
+
+    setTimeout(API_getHomePageNew, REQUEST_TIMEOUT);
+};
+
+var handleBaoKuanDetail = function (detail) {
+
+    showLog(detail);
+
+    var productDetail = getBaoKuanProductDetail(detail.sku);
+    var existedInventory = productDetail.inventory;
+    var newInventory = detail.inventory;
     var inventoryStatus = undefined;
+
     if (existedInventory === undefined && newInventory === 0) {
         inventoryStatus = "一开始就没货";
     } else if (existedInventory !== newInventory && newInventory > 0) {
@@ -167,50 +199,35 @@ var onDetailReceived = function (response) {
     }
     if (inventoryStatus !== undefined) {
         showLog("", true);
-        showLog("商品：" + response.result.productName, true);
+        showLog("商品：" + detail.productName, true);
         showLog("库存状态：" + inventoryStatus, true);
         showLog("库存：" + newInventory, true);
-        showLog("售价：" + response.result.payNeedGoldenBean + " 金币", true);
+        showLog("售价：" + detail.payNeedGoldenBean + " 金币", true);
         showLog("当前时间：" + moment().format("YYYY-MM-DD HH:mm:ss.SSS"), true);
     }
 
-    baoKuanInventoryMap[response.result.sku] = newInventory;
+    productDetail.inventory = newInventory;
+}
 
-    receivedBaoKuanDetailsCount++;
-    if (receivedBaoKuanDetailsCount === baoKuanDetailsCount) {
-//         setTimeout(API_getHomePageNew, REQUEST_INTERVAL);
+var getBaoKuanProductDetail = function (sku) {
+    for (var i = 0; i < baoKuanProductDetails.length; i++) {
+        var detail = baoKuanProductDetails[i];
+        if (detail.sku === sku) {
+            return detail;
+        }
     }
-};
-
-// Injected Functions
-
-var handleFloorBaoKuan = function (floor) {
-
-    showLog("Catch it!");
-    showLog("-> title: " + floor.title);
-    showLog("-> count: " + floor.details.length);
-    showLog(floor);
-
-    baoKuanDetailsCount = floor.details.length;
-    receivedBaoKuanDetailsCount = 0;
-
-    var details = floor.details;
-    for (var i = 0; i < details.length; i++) {
-        var linkUrl = details[i].linkUrl;
-        var sku = getParamValue(linkUrl, "sku");
-        var productSourceType = getParamValue(linkUrl, "productSourceType");
-        API_detail(sku, productSourceType);
-    }
+    return null;
 };
 
 // Global Variables & Getter/Setter
 
-var REQUEST_INTERVAL = 100;
+var REQUEST_TIMEOUT = 10;
+var REQUEST_INTERVAL = 500;
 
-var baoKuanDetailsCount = 0;
-var receivedBaoKuanDetailsCount = 0;
+var baoKuanProductDetails = [];
 
-var baoKuanInventoryMap = {};
+var API_getHomePageNew_count = 0;
+var API_detail_count = 0;
 
 // Utils
 
@@ -242,5 +259,5 @@ var getParamValue = function (url, key) {
 $(function() {
     'use strict';
 
-    setTimeout(API_getHomePageNew, REQUEST_INTERVAL);
+    setTimeout(API_getHomePageNew, REQUEST_TIMEOUT);
 });
