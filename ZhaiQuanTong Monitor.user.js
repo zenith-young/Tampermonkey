@@ -80,7 +80,7 @@ var post = function (url, data) {
     return ajax("POST", url, createPostRequestHeader(), data);
 };
 
-var enhancedPost = function (url, data, onSuccess) {
+var enhancedPost = function (url, data) {
     return ajax("OPTIONS", url, createOptionsRequestHeader(), undefined).then(function (r1) {
         return ajax("POST", url, createPostRequestHeader(), data);
     });
@@ -159,18 +159,13 @@ var API_doConfirmOrderV2 = function (data) {
 var REQUEST_TIMEOUT = 50;
 var REQUEST_INTERVAL = 500;
 
+var defaultAddress = undefined;
 var baoKuanProductDetails = [];
 
-var API_getHomePageNew_count = 0;
-var API_detail_count = 0;
-
-var defaultAddress = undefined;
-
-// // Injected Functions
+// Injected Functions - Monitor BaoKuan List
 
 var Monitor_GetHomePageNew = function () {
     API_getHomePageNew().then(function (response) {
-        showLog("API_getHomePageNew count: " + ++API_getHomePageNew_count);
         if (response.status !== "000000") {
             showLog(response);
             return;
@@ -178,14 +173,14 @@ var Monitor_GetHomePageNew = function () {
         var floors = response.result.floors;
         for (var i = 0; i < floors.length; i++) {
             if (floors[i].floorType === "57") {
-                handleBaoKuanFloor(floors[i]);
+                handleBaoKuanList(floors[i]);
                 break;
             }
         }
     });
 };
 
-var handleBaoKuanFloor = function (floor) {
+var handleBaoKuanList = function (floor) {
 
     showLog(floor);
 
@@ -200,55 +195,33 @@ var handleBaoKuanFloor = function (floor) {
             linkUrl: linkUrl,
             sku: sku,
             productSourceType: productSourceType,
-            inventory: undefined,
+            detail: undefined,
+            productInfo: undefined,
         });
-        showLog(floor.details[i], true);
-//         setInterval(Monitor_Detail, REQUEST_INTERVAL, sku, productSourceType);
-
-        submitOrder(sku, productSourceType);
+        showLog(floor.details[i]);
+        setInterval(Monitor_Detail, REQUEST_INTERVAL, sku, productSourceType);
+        setTimeout(Monitor_DoConfirmOrderV2, REQUEST_TIMEOUT, sku, productSourceType);
     }
 
     setTimeout(Monitor_GetHomePageNew, REQUEST_TIMEOUT);
 };
 
+// Injected Functions - Monitor BaoKuan Detail
+
 var Monitor_Detail = function (sku, productSourceType) {
     API_detail(sku, productSourceType).then(function (response) {
-        showLog("API_detail count: " + ++API_detail_count);
         if (response.status !== "000000") {
             showLog(response);
             return;
         }
-        handleBaoKuanDetail(response.result);
+        showLog(response.result);
+        var productDetail = getBaoKuanProductDetail(response.result.sku);
+        productDetail.detail = response.result;
+        // productName
+        // inventory
+        // payNeedGoldenBean
     });
 };
-
-var handleBaoKuanDetail = function (detail) {
-
-    showLog(detail);
-
-    var productDetail = getBaoKuanProductDetail(detail.sku);
-    var existedInventory = productDetail.inventory;
-    var newInventory = detail.inventory;
-    var inventoryStatus = undefined;
-
-    if (existedInventory === undefined && newInventory === 0) {
-        inventoryStatus = "一开始就没货";
-    } else if (existedInventory !== newInventory && newInventory > 0) {
-        inventoryStatus = "有货";
-    } else if (existedInventory !== newInventory && newInventory === 0) {
-        inventoryStatus = "刚刚卖光了";
-    }
-    if (inventoryStatus !== undefined) {
-        showLog("", true);
-        showLog("商品：" + detail.productName, true);
-        showLog("库存状态：" + inventoryStatus, true);
-        showLog("库存：" + newInventory, true);
-        showLog("售价：" + detail.payNeedGoldenBean + " 金币", true);
-        showLog("当前时间：" + moment().format("YYYY-MM-DD HH:mm:ss.SSS"), true);
-    }
-
-    productDetail.inventory = newInventory;
-}
 
 var getBaoKuanProductDetail = function (sku) {
     for (var i = 0; i < baoKuanProductDetails.length; i++) {
@@ -260,9 +233,10 @@ var getBaoKuanProductDetail = function (sku) {
     return null;
 };
 
-var submitOrder = function (sku, productSourceType) {
+// Injected Functions - Monitor Submit Order
 
-    var p1 = API_detail(sku, productSourceType);
+var Monitor_DoConfirmOrderV2 = function (sku, productSourceType) {
+
     var p2 = API_productInfoV2(sku, productSourceType);
 
     Promise.all([p1, p2]).then(function (response) {
