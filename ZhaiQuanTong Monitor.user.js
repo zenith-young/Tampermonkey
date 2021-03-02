@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      0.1
 // @description  Script for monitoring ZhaiQuanTong's products
-// @author       You
+// @author       Anonymous
 // @match        https://web.meiduzaixian.com/mall/mall-app/mall-web/index.html
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js
 // @require      https://cdn.bootcdn.net/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js
@@ -81,8 +81,8 @@ var post = function (url, data) {
 };
 
 var enhancedPost = function (url, data) {
-    return ajax("OPTIONS", url, createOptionsRequestHeader(), undefined).then(function (r1) {
-        return ajax("POST", url, createPostRequestHeader(), data);
+    return options(url).then(function (r1) {
+        return post(url, data);
     });
 };
 
@@ -154,13 +154,23 @@ var API_doConfirmOrderV2 = function (data) {
     return enhancedPost(url, data);
 };
 
-// Global Variables & Getter/Setter
+// Global Variables
 
 var REQUEST_TIMEOUT = 50;
-var REQUEST_INTERVAL = 500;
+var REQUEST_INTERVAL = 100;
 
 var defaultAddress = undefined;
 var baoKuanProductDetails = [];
+
+var getBaoKuanProductDetail = function (sku) {
+    for (var i = 0; i < baoKuanProductDetails.length; i++) {
+        var detail = baoKuanProductDetails[i];
+        if (detail.sku === sku) {
+            return detail;
+        }
+    }
+    return null;
+};
 
 // Injected Functions - Monitor BaoKuan List
 
@@ -185,28 +195,38 @@ var handleBaoKuanList = function (floor) {
     showLog(floor);
 
     for (var i = 0; i < floor.details.length; i++) {
+
         var linkUrl = floor.details[i].linkUrl;
         var sku = getParamValue(linkUrl, "sku");
         var productSourceType = getParamValue(linkUrl, "productSourceType");
+
         if (getBaoKuanProductDetail(sku) !== null) {
             continue;
         }
+
+        showLog(floor.details[i]);
+
+        var timerGetDetail = setInterval(Monitor_Detail, REQUEST_INTERVAL, sku, productSourceType);
+        var timerGetProductInfo = setInterval(Monitor_ProductInfoV2, REQUEST_INTERVAL, sku, productSourceType);
+        var timerConfirmOrder = setInterval(Monitor_DoConfirmOrderV2, REQUEST_INTERVAL, sku, productSourceType);
+
         baoKuanProductDetails.push({
             linkUrl: linkUrl,
             sku: sku,
             productSourceType: productSourceType,
             detail: undefined,
             productInfo: undefined,
+            orderSuccess: false,
+            timerGetDetail: timerGetDetail,
+            timerGetProductInfo: timerGetProductInfo,
+            timerConfirmOrder: timerConfirmOrder,
         });
-        showLog(floor.details[i]);
-        setInterval(Monitor_Detail, REQUEST_INTERVAL, sku, productSourceType);
-        setTimeout(Monitor_DoConfirmOrderV2, REQUEST_TIMEOUT, sku, productSourceType);
     }
 
     setTimeout(Monitor_GetHomePageNew, REQUEST_TIMEOUT);
 };
 
-// Injected Functions - Monitor BaoKuan Detail
+// Injected Functions - Monitor Detail
 
 var Monitor_Detail = function (sku, productSourceType) {
     API_detail(sku, productSourceType).then(function (response) {
@@ -215,61 +235,70 @@ var Monitor_Detail = function (sku, productSourceType) {
             return;
         }
         showLog(response.result);
-        var productDetail = getBaoKuanProductDetail(response.result.sku);
-        productDetail.detail = response.result;
+        var productDetail = getBaoKuanProductDetail(sku);
+        if (productDetail.detail === undefined) {
+            productDetail.detail = response.result;
+            clearInterval(productDetail.timerGetDetail);
+        }
         // productName
         // inventory
         // payNeedGoldenBean
     });
 };
 
-var getBaoKuanProductDetail = function (sku) {
-    for (var i = 0; i < baoKuanProductDetails.length; i++) {
-        var detail = baoKuanProductDetails[i];
-        if (detail.sku === sku) {
-            return detail;
+// Injected Functions - Monitor Product Info
+
+var Monitor_ProductInfoV2 = function (sku, productSourceType) {
+    API_productInfoV2(sku, productSourceType).then(function (response) {
+        if (response.status !== "000000") {
+            showLog(response);
+            return;
         }
-    }
-    return null;
+        showLog(response.result);
+        var productDetail = getBaoKuanProductDetail(sku);
+        if (productDetail.productInfo === undefined) {
+            productDetail.productInfo = response.result;
+            clearInterval(productDetail.timerGetProductInfo);
+        }
+    });
 };
 
-// Injected Functions - Monitor Submit Order
+// Injected Functions - Monitor Confirm Order
 
 var Monitor_DoConfirmOrderV2 = function (sku, productSourceType) {
 
-    var p2 = API_productInfoV2(sku, productSourceType);
+    var productDetail = getBaoKuanProductDetail(sku);
+    if (productDetail.detail === undefined || productDetail.productInfo === undefined || productDetail.orderSuccess === true) {
+        return;
+    }
 
-    Promise.all([p1, p2]).then(function (response) {
-        var r1 = response[0];
-        var r2 = response[1];
-        if (r1.status !== "000000" || r2.status !== "000000") {
-            showLog("Failed to call API_detail or API_productInfoV2", true);
-            setTimeout(submitOrder, REQUEST_TIMEOUT, sku, productSourceType);
-            return;
+    var r1 = productDetail.detail;
+    var r2 = productDetail.productInfo;
+
+    var data = {
+        activityInfo: {},
+        actualAmount: "0.00",
+        busType: "01",
+        cashAmount: r1.payNeedGoldenBean.toString(),
+        cashCouponSms: "",
+        invoiceInfo: (r2.invoiceInfo === null || r2.invoiceInfo === undefined) ? {} : r2.invoiceInfo,
+        mobile: "",
+        payType: 0,
+        pluStatus: r2.pluStatus,
+        productInfoNo: "",
+        productSourceType: productSourceType,
+        shopList: r2.shopList,
+        userAddressInfo: defaultAddress,
+    };
+
+    API_doConfirmOrderV2(data).then(function (r3) {
+        if (r3.response === true) {
+            showLog("成功下单：" + r1.productName, true);
+            productDetail.orderSuccess = true;
+            clearInterval(productDetail.timerConfirmOrder);
+        } else {
+            showLog(r3);
         }
-        var data = {
-            activityInfo: {},
-            actualAmount: "0.00",
-            busType: "01",
-            cashAmount: r1.result.payNeedGoldenBean.toString(),
-            cashCouponSms: "",
-            invoiceInfo: (r2.result.invoiceInfo === null || r2.result.invoiceInfo === undefined) ? {} : r2.result.invoiceInfo,
-            mobile: "",
-            payType: 0,
-            pluStatus: r2.result.pluStatus,
-            productInfoNo: "",
-            productSourceType: productSourceType,
-            shopList: r2.result.shopList,
-            userAddressInfo: defaultAddress,
-        };
-        API_doConfirmOrderV2(data).then(function (r4) {
-            if (r4.response === true) {
-                showLog("成功下单：" + r1.result.productName, true);
-            } else {
-                showLog(r4, true);
-                setTimeout(submitOrder, REQUEST_TIMEOUT, sku, productSourceType);
-            }
-        });
     });
 };
 
@@ -310,6 +339,6 @@ $(function() {
         defaultAddress.receiverAddress = defaultAddress.address;
         defaultAddress.receiverAddressId = defaultAddress.id;
 
-//         setTimeout(Monitor_GetHomePageNew, REQUEST_TIMEOUT);
+        setTimeout(Monitor_GetHomePageNew, REQUEST_TIMEOUT);
     });
 });
