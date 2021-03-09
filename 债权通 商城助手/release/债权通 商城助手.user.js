@@ -181,12 +181,17 @@ var Monitor_GetHomePageNew = function () {
             setTimeout(Monitor_GetHomePageNew, REQUEST_TIMEOUT);
             return;
         }
+        var isBaoKuanExist = false;
         var floors = response.result.floors;
         for (var i = 0; i < floors.length; i++) {
             if (floors[i].floorType === "57") {
+                isBaoKuanExist = true;
                 handleBaoKuanList(floors[i]);
                 break;
             }
+        }
+        if (!isBaoKuanExist) {
+            showLog("爆款商品不存在", true);
         }
     }, function (err) {
         showLog(err);
