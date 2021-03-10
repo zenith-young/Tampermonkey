@@ -191,7 +191,8 @@ var Monitor_GetHomePageNew = function () {
             }
         }
         if (!isBaoKuanExist) {
-            showLog("爆款商品不存在", true);
+            showLog("爆款商品不存在");
+            setTimeout(Monitor_GetHomePageNew, REQUEST_TIMEOUT);
         }
     }, function (err) {
         showLog(err);
