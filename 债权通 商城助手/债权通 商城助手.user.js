@@ -244,6 +244,7 @@ var Monitor_Detail = function (sku, productSourceType) {
         var productDetail = getBaoKuanProductDetail(sku);
         if (productDetail.detail === undefined) {
             productDetail.detail = response.result;
+            showLog("发现商品：" + productDetail.detail.productName, true);
         }
         setTimeout(Monitor_ProductInfoV2, REQUEST_TIMEOUT, sku, productSourceType);
         // productName
